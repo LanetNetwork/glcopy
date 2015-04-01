@@ -1,0 +1,9 @@
+[submodule "pfpthquirks"]
+	path = pfpthquirks
+	url = https://github.com/LanetNetwork/pfpthquirks
+[submodule "pfglfsquirks"]
+	path = pfglfsquirks
+	url = https://github.com/LanetNetwork/pfglfsquirks
+[submodule "pfcquirks"]
+	path = pfcquirks
+	url = https://github.com/LanetNetwork/pfcquirks
