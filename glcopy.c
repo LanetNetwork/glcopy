@@ -21,6 +21,8 @@
 #include <errno.h>
 #include <getopt.h>
 #include <glusterfs/api/glfs.h>
+#include <libcephfs.h>
+#include <pfcfsq.h>
 #include <pfcq.h>
 #include <pfgfq.h>
 #include <pfpthq.h>
@@ -285,7 +287,7 @@ static void walk_nodes_dentry_handler(glfs_t* _fs, const char* _path, struct dir
 			new_mkdir_context->fop.mode = _sb->st_mode;
 			pfpthq_inc(pool, &id, "mkdir worker", mkdir_worker, (void*)new_mkdir_context);
 		}
-		walk_dir_generic(_fs, _path, walk_nodes_dentry_handler, NULL, _data, 0);
+		glfs_walk_dir_generic(_fs, _path, walk_nodes_dentry_handler, NULL, _data, 0);
 	}
 	else
 	{
@@ -367,7 +369,7 @@ int main(int argc, char** argv)
 	}
 
 	for (unsigned int i = 0; i < src_nodes_count; i++)
-		walk_dir_generic(src_nodes[i].fs, src_nodes[i].path, walk_nodes_dentry_handler, NULL, &i, 0);
+		glfs_walk_dir_generic(src_nodes[i].fs, src_nodes[i].path, walk_nodes_dentry_handler, NULL, &i, 0);
 
 	for (unsigned int i = 0; i < src_nodes_count; i++)
 	{

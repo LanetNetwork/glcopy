@@ -7,3 +7,6 @@
 [submodule "pfcquirks"]
 	path = pfcquirks
 	url = https://github.com/LanetNetwork/pfcquirks
+[submodule "pfcephfsquirks"]
+	path = pfcephfsquirks
+	url = https://github.com/LanetNetwork/pfcephfsquirks

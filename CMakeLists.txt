@@ -21,8 +21,11 @@ if (PKG_CONFIG_FOUND)
 	endif(NOT CMAKE_BUILD_TYPE MATCHES Debug)
 endif (PKG_CONFIG_FOUND)
 
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake-scripts)
+find_package(CEPHFS)
+
 set(CMAKE_C_FLAGS
-	"-std=c99 -D_DEFAULT_SOURCE -D_GNU_SOURCE -W -Wall -Wextra -pedantic -Wwrite-strings -Winit-self -Wcast-qual -Wpointer-arith -Wstrict-aliasing -Wformat=2 -Wmissing-declarations -Wmissing-include-dirs -Wno-unused-parameter -Wuninitialized -Wold-style-definition -Wstrict-prototypes -Wmissing-prototypes")
+	"-std=c99 -D_DEFAULT_SOURCE -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -W -Wall -Wextra -pedantic -Wwrite-strings -Winit-self -Wcast-qual -Wpointer-arith -Wstrict-aliasing -Wformat=2 -Wmissing-declarations -Wmissing-include-dirs -Wno-unused-parameter -Wuninitialized -Wold-style-definition -Wstrict-prototypes -Wmissing-prototypes")
 if (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "Intel")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wpadded")
 endif (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "Intel")
@@ -34,10 +37,14 @@ endif ("${CMAKE_C_COMPILER_ID}" STREQUAL "Intel")
 
 set(CMAKE_C_FLAGS_RELEASE "-O3 -march=native -DMODE_NORMAL")
 
-include_directories(pfcquirks)
-include_directories(pfglfsquirks)
-include_directories(pfpthquirks)
+include_directories(.
+	pfcephfsquirks
+	pfcquirks
+	pfglfsquirks
+	pfpthquirks
+	${CEPHFS_INCLUDE_DIRS})
 
+add_subdirectory(pfcephfsquirks)
 add_subdirectory(pfcquirks)
 add_subdirectory(pfglfsquirks)
 add_subdirectory(pfpthquirks)
@@ -47,6 +54,7 @@ add_executable(glcopy
 
 target_link_libraries(glcopy
 	pthread
+	${CEPHFS_LIBRARIES}
 	${GLUSTERFS-API_LIBRARIES}
 	ln_pfcquirks
 	ln_pfglfsquirks
