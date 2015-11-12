@@ -32,15 +32,39 @@
 
 #define DEFAULT_WORKERS_COUNT	3
 
-typedef struct gl_node
+typedef enum glc_node_type
+{
+	GLCNT_CFS,
+	GLCNT_GLFS
+} glc_node_type_t;
+
+typedef struct glc_cfs_node
+{
+	int __padding1; /* struct padding */
+} glc_cfs_node_t;
+
+typedef struct glc_glfs_node
 {
 	glfs_t* fs;
 	char* protocol;
 	char* server;
 	char* volume;
-	char* path;
 	int port;
-	int padding; /* struct padding */
+	int __padding1; /* struct padding */
+} glc_glfs_node_t;
+
+typedef union glc_node
+{
+	glc_cfs_node_t cfs_node;
+	glc_glfs_node_t glfs_node;
+} glc_node_t;
+
+typedef struct gl_node
+{
+	glc_node_type_t node_type;
+	int __padding1; /* struct padding */
+	glc_node_t node;
+	char* path;
 } gl_node_t;
 
 typedef struct fop_args
@@ -58,13 +82,19 @@ typedef struct mkdir_context
 	fop_args_t fop;
 } mkdir_context_t;
 
+typedef union glc_fd_hd
+{
+	glfs_fd_t* glfs_fd_hd;
+	int cfs_fd_hd;
+} glc_fd_hd_t;
+
 typedef struct copy_context
 {
 	fop_args_t fop;
 	char buffer[IO_CHUNK_SIZE];
 	ssize_t read_size;
-	glfs_fd_t* src_fd;
-	glfs_fd_t* dst_fd;
+	glc_fd_hd_t src_fd;
+	glc_fd_hd_t dst_fd;
 } copy_context_t;
 
 static gl_node_t* src_nodes = NULL;
@@ -89,39 +119,50 @@ static void add_node(gl_node_t** _list, unsigned int* _counter, const char* _uri
 	if (unlikely(!tmp_p))
 		goto out;
 
-	// protocol:server:port:volume:path
+	// fs:protocol:server:port:volume:path
 	part = strsep(&p, ":");
 	if (unlikely(!part))
-		goto err;
-	(*_list[*_counter]).protocol = pfcq_strdup(part);
-	part = strsep(&p, ":");
-	if (unlikely(!part))
-		goto err;
-	(*_list[*_counter]).server = pfcq_strdup(part);
-	part = strsep(&p, ":");
-	if (unlikely(!part))
-		goto err;
-	if (unlikely(!pfcq_isnumber(part)))
-		goto err;
-	(*_list[*_counter]).port = atoi(part);
-	part = strsep(&p, ":");
-	if (unlikely(!part))
-		goto err;
-	(*_list[*_counter]).volume = pfcq_strdup(part);
-	part = strsep(&p, ":");
-	if (unlikely(!part))
-		goto err;
-	(*_list[*_counter]).path = pfcq_strdup(part);
+		goto lfree;
+	if (strcmp(part, "cfs") == 0)
+	{
+	} else if (strcmp(part, "glfs") == 0)
+	{
+		(*_list[*_counter]).node_type = GLCNT_GLFS;
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto glfs_err;
+		(*_list[*_counter]).node.glfs_node.protocol = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto glfs_err;
+		(*_list[*_counter]).node.glfs_node.server = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto glfs_err;
+		if (unlikely(!pfcq_isnumber(part)))
+			goto glfs_err;
+		(*_list[*_counter]).node.glfs_node.port = atoi(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto glfs_err;
+		(*_list[*_counter]).node.glfs_node.volume = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto glfs_err;
+		(*_list[*_counter]).path = pfcq_strdup(part);
+		goto glfs_lfree;
+
+glfs_err:
+		pfcq_free((*_list[*_counter]).node.glfs_node.protocol);
+		pfcq_free((*_list[*_counter]).node.glfs_node.server);
+		pfcq_free((*_list[*_counter]).node.glfs_node.volume);
+		pfcq_free((*_list[*_counter]).path);
+		(*_list[*_counter]).node.glfs_node.port = 0;
+glfs_lfree:
+		__noop;
+	}
 
 	(*_counter)++;
-	goto lfree;
-
-err:
-	pfcq_free((*_list[*_counter]).protocol);
-	pfcq_free((*_list[*_counter]).server);
-	pfcq_free((*_list[*_counter]).volume);
-	pfcq_free((*_list[*_counter]).path);
-	(*_list[*_counter]).port = 0;
 
 lfree:
 	pfcq_free(tmp_p);
@@ -132,45 +173,73 @@ out:
 
 static void open_node(gl_node_t* _list, unsigned int _index, char* _log)
 {
-	if (unlikely(_list[_index].protocol[0] == 0))
-		_list[_index].protocol = pfcq_strdup(GLFS_DEFAULT_PROTOCOL);
-	if (unlikely(!_list[_index].server))
-		panic("No GlusterFS server specified!");
-	if (unlikely(_list[_index].port == 0))
-		_list[_index].port = GLFS_DEFAULT_PORT;
-	if (unlikely(!_list[_index].volume))
-		panic("No GlusterFS volume specified!");
-	if (unlikely(!_list[_index].path))
-		panic("No GlusterFS source path specified!");
+	switch (_list[_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			if (unlikely(_list[_index].node.glfs_node.protocol[0] == 0))
+				_list[_index].node.glfs_node.protocol = pfcq_strdup(GLFS_DEFAULT_PROTOCOL);
+			if (unlikely(!_list[_index].node.glfs_node.server))
+				panic("No GlusterFS server specified!");
+			if (unlikely(_list[_index].node.glfs_node.port == 0))
+				_list[_index].node.glfs_node.port = GLFS_DEFAULT_PORT;
+			if (unlikely(!_list[_index].node.glfs_node.volume))
+				panic("No GlusterFS volume specified!");
+			if (unlikely(!_list[_index].path))
+				panic("No GlusterFS source path specified!");
 
-	_list[_index].fs = glfs_new(_list[_index].volume);
-	if (unlikely(!_list[_index].fs))
-		panic("glfs_new");
-	if (unlikely(glfs_set_volfile_server(_list[_index].fs, _list[_index].protocol, _list[_index].server, _list[_index].port)))
-		panic("glfs_set_volfile_server");
-	if (unlikely(glfs_set_logging(_list[_index].fs, _log, GLFS_DEFAULT_VERBOSITY)))
-		warning("glfs_set_logging");
+			_list[_index].node.glfs_node.fs = glfs_new(_list[_index].node.glfs_node.volume);
+			if (unlikely(!_list[_index].node.glfs_node.fs))
+				panic("glfs_new");
+			if (unlikely(glfs_set_volfile_server(
+				_list[_index].node.glfs_node.fs, _list[_index].node.glfs_node.protocol, _list[_index].node.glfs_node.server, _list[_index].node.glfs_node.port)))
+				panic("glfs_set_volfile_server");
+			if (unlikely(glfs_set_logging(_list[_index].node.glfs_node.fs, _log, GLFS_DEFAULT_VERBOSITY)))
+				warning("glfs_set_logging");
 
-	if (unlikely(glfs_init(_list[_index].fs)))
-		panic("glfs_init");
+			if (unlikely(glfs_init(_list[_index].node.glfs_node.fs)))
+				panic("glfs_init");
+			break;
+		default:
+			break;
+	}
 
 	return;
 }
 
 static void close_node(gl_node_t* _list, unsigned int _index)
 {
-	if (unlikely(glfs_fini(_list[_index].fs)))
-		warning("glfs_fini");
+	switch (_list[_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			if (unlikely(glfs_fini(_list[_index].node.glfs_node.fs)))
+				warning("glfs_fini");
+			break;
+		default:
+			break;
+	}
 
 	return;
 }
 
 static void delete_node(gl_node_t** _list, unsigned int _index)
 {
-	pfcq_free((*_list[_index]).protocol);
-	pfcq_free((*_list[_index]).server);
-	(*_list[_index]).port = 0;
-	pfcq_free((*_list[_index]).volume);
+	switch ((*_list[_index]).node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			pfcq_free((*_list[_index]).node.glfs_node.protocol);
+			pfcq_free((*_list[_index]).node.glfs_node.server);
+			(*_list[_index]).node.glfs_node.port = 0;
+			pfcq_free((*_list[_index]).node.glfs_node.volume);
+			break;
+		default:
+			break;
+	}
 	pfcq_free((*_list[_index]).path);
 	pfcq_free(_list[_index]);
 
@@ -203,7 +272,16 @@ static void mkdir_node(mkdir_context_t* _context)
 	_context->fop.dst_path = getdstpath_node(_context->fop.dst_index, _context->fop.src_path, _context->fop.src_index);
 
 	verbose("Making directory %s on node dst-%u\n", _context->fop.dst_path, _context->fop.dst_index);
-	glfs_mkdir_safe(dst_nodes[_context->fop.dst_index].fs, _context->fop.dst_path, _context->fop.mode);
+	switch (dst_nodes[_context->fop.dst_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			glfs_mkdir_safe(dst_nodes[_context->fop.dst_index].node.glfs_node.fs, _context->fop.dst_path, _context->fop.mode);
+			break;
+		default:
+			break;
+	}
 
 	pfcq_free(_context->fop.dst_path);
 
@@ -215,22 +293,87 @@ static void copyfile_node(copy_context_t* _context)
 	_context->fop.dst_path = getdstpath_node(_context->fop.dst_index, _context->fop.src_path, _context->fop.src_index);
 
 	verbose("Copying file %s from src-%u to %s on node dst-%u\n", _context->fop.src_path, _context->fop.src_index, _context->fop.dst_path, _context->fop.dst_index);
-	_context->src_fd = glfs_open(src_nodes[_context->fop.src_index].fs, _context->fop.src_path, O_RDONLY);
-	if (unlikely(!_context->src_fd))
-		goto lfree;
-	_context->dst_fd = glfs_creat(dst_nodes[_context->fop.dst_index].fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
-	if (unlikely(!_context->src_fd))
-		goto lfree;
 
-	while ((_context->read_size = glfs_read(_context->src_fd, _context->buffer, IO_CHUNK_SIZE, 0)) > 0)
-		glfs_write(_context->dst_fd, _context->buffer, _context->read_size, 0);
+	switch (src_nodes[_context->fop.src_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			_context->src_fd.glfs_fd_hd = glfs_open(src_nodes[_context->fop.src_index].node.glfs_node.fs, _context->fop.src_path, O_RDONLY);
+			if (unlikely(!_context->src_fd.glfs_fd_hd))
+				goto glfs_err;
+			_context->dst_fd.glfs_fd_hd = glfs_creat(dst_nodes[_context->fop.dst_index].node.glfs_node.fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
+			if (unlikely(!_context->dst_fd.glfs_fd_hd))
+				goto glfs_err;
 
-lfree:
-	if (likely(_context->dst_fd))
-		glfs_close(_context->dst_fd);
-	if (likely(_context->src_fd))
-		glfs_close(_context->src_fd);
+			goto glfs_out;
 
+glfs_err:
+			if (likely(_context->src_fd.glfs_fd_hd))
+				glfs_close(_context->src_fd.glfs_fd_hd);
+			if (likely(_context->dst_fd.glfs_fd_hd))
+				glfs_close(_context->dst_fd.glfs_fd_hd);
+			goto out;
+
+glfs_out:
+			break;
+		default:
+			break;
+	}
+
+	for (;;)
+	{
+		switch (src_nodes[_context->fop.src_index].node_type)
+		{
+			case GLCNT_CFS:
+				break;
+			case GLCNT_GLFS:
+				_context->read_size = glfs_read(_context->src_fd.glfs_fd_hd, _context->buffer, IO_CHUNK_SIZE, 0);
+				break;
+			default:
+				break;
+		}
+
+		if (_context->read_size <= 0)
+			break;
+
+		switch (dst_nodes[_context->fop.dst_index].node_type)
+		{
+			case GLCNT_CFS:
+				break;
+			case GLCNT_GLFS:
+				glfs_write(_context->dst_fd.glfs_fd_hd, _context->buffer, _context->read_size, 0);
+				break;
+			default:
+				break;
+		}
+	}
+
+	switch (src_nodes[_context->fop.src_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			if (likely(_context->src_fd.glfs_fd_hd))
+				glfs_close(_context->src_fd.glfs_fd_hd);
+			break;
+		default:
+			break;
+	}
+
+	switch (dst_nodes[_context->fop.dst_index].node_type)
+	{
+		case GLCNT_CFS:
+			break;
+		case GLCNT_GLFS:
+			if (likely(_context->dst_fd.glfs_fd_hd))
+				glfs_close(_context->dst_fd.glfs_fd_hd);
+			break;
+		default:
+			break;
+	}
+
+out:
 	pfcq_free(_context->fop.dst_path);
 
 	return;
@@ -365,11 +508,31 @@ int main(int argc, char** argv)
 	for (unsigned int i = 0; i < dst_nodes_count; i++)
 	{
 		open_node(dst_nodes, i, glfs_log);
-		glfs_mkdir_safe(dst_nodes[i].fs, dst_nodes[i].path, CHMOD_755);
+		switch (dst_nodes[i].node_type)
+		{
+			case GLCNT_CFS:
+				break;
+			case GLCNT_GLFS:
+				glfs_mkdir_safe(dst_nodes[i].node.glfs_node.fs, dst_nodes[i].path, CHMOD_755);
+				break;
+			default:
+				break;
+		}
 	}
 
 	for (unsigned int i = 0; i < src_nodes_count; i++)
-		glfs_walk_dir_generic(src_nodes[i].fs, src_nodes[i].path, walk_nodes_dentry_handler, NULL, &i, 0);
+	{
+		switch (src_nodes[i].node_type)
+		{
+			case GLCNT_CFS:
+				break;
+			case GLCNT_GLFS:
+				glfs_walk_dir_generic(src_nodes[i].node.glfs_node.fs, src_nodes[i].path, walk_nodes_dentry_handler, NULL, &i, 0);
+				break;
+			default:
+				break;
+		}
+	}
 
 	for (unsigned int i = 0; i < src_nodes_count; i++)
 	{
