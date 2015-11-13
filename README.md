@@ -4,7 +4,7 @@ glcopy
 Description
 -----------
 
-Utility to perform massive files copy over GlusterFS shares.
+Utility to perform massive files copy over GlusterFS/CephFS shares.
 
 Compiling
 ---------
@@ -33,17 +33,20 @@ Usage
 
 The following arguments are supported:
 
-* --from=&lt;[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies source GlusterFS endpoint;
-* --to=&lt;[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies target GlusterFS endpoint;
+* --from=&lt;glfs:[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies source GlusterFS endpoint;
+* --to=&lt;glfs:[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies target GlusterFS endpoint;
+* --from=&lt;cfs:monitors:id:keyring\_file:root:path&gt; (mandatory) specifies source CephFS endpoint;
+* --to=&lt;cfs:monitors:id:keyring\_file:root:path&gt; (mandatory) specifies target CephFS endpoint;
 * --workers=&lt;amount&gt; (optional, default "3") specifies parallel copy workers count (specifying more than 4 is dangerous due to high server CPU load!);
-* --debug (optional) enables verbose output;
+* --verbose (optional) enables verbose output;
+* --debug (optional) enables debug output;
 * --syslog (optional) logs everything to syslog instead of /dev/stderr.
 
 There may be multiple --from and --to arguments.
 
 Typical usage:
 
-`glcopy --from=:data::ott:/ --to=:baikal::ott:/ --syslog`
+`glcopy --from=glfs::data::ott:/ --to=cfs:baikal:admin:/key:/ott:/ --verbose`
 
 Distribution and Contribution
 -----------------------------
