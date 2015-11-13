@@ -367,40 +367,29 @@ static void copyfile_node(copy_context_t* _context)
 		case GLCNT_CFS:
 			_context->src_fd.cfs_fd_hd = ceph_open(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->fop.src_path, O_RDONLY, 0);
 			if (unlikely(!_context->src_fd.glfs_fd_hd))
-				goto cfs_err;
-			_context->dst_fd.cfs_fd_hd = ceph_open(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
-			if (unlikely(!_context->dst_fd.cfs_fd_hd))
-				goto cfs_err;
-
-			goto cfs_out;
-
-cfs_err:
-			if (likely(_context->src_fd.cfs_fd_hd))
-				ceph_close(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->src_fd.cfs_fd_hd);
-			if (likely(_context->dst_fd.cfs_fd_hd))
-				ceph_close(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->dst_fd.cfs_fd_hd);
-			goto out;
-
-cfs_out:
+				panic("ceph_open");
 			break;
 		case GLCNT_GLFS:
 			_context->src_fd.glfs_fd_hd = glfs_open(src_nodes[_context->fop.src_index].node.glfs_node.fs, _context->fop.src_path, O_RDONLY);
 			if (unlikely(!_context->src_fd.glfs_fd_hd))
-				goto glfs_err;
+				panic("glfs_open");
+			break;
+		default:
+			panic("Not implemented");
+			break;
+	}
+
+	switch (dst_nodes[_context->fop.dst_index].node_type)
+	{
+		case GLCNT_CFS:
+			_context->dst_fd.cfs_fd_hd = ceph_open(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
+			if (unlikely(!_context->dst_fd.cfs_fd_hd))
+				panic("ceph_open");
+			break;
+		case GLCNT_GLFS:
 			_context->dst_fd.glfs_fd_hd = glfs_creat(dst_nodes[_context->fop.dst_index].node.glfs_node.fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
 			if (unlikely(!_context->dst_fd.glfs_fd_hd))
-				goto glfs_err;
-
-			goto glfs_out;
-
-glfs_err:
-			if (likely(_context->src_fd.glfs_fd_hd))
-				glfs_close(_context->src_fd.glfs_fd_hd);
-			if (likely(_context->dst_fd.glfs_fd_hd))
-				glfs_close(_context->dst_fd.glfs_fd_hd);
-			goto out;
-
-glfs_out:
+				panic("glfs_creat");
 			break;
 		default:
 			panic("Not implemented");
@@ -469,7 +458,6 @@ glfs_out:
 			break;
 	}
 
-out:
 	pfcq_free(_context->fop.dst_path);
 
 	return;
@@ -594,14 +582,14 @@ int main(int argc, char** argv)
 	struct option longopts[] = {
 		{"from",	required_argument,	NULL, 'a'},
 		{"to",		required_argument,	NULL, 'b'},
-		{"workers",	required_argument,	NULL, 'e'},
-		{"verbose",	required_argument,	NULL, 'f'},
-		{"debug",	no_argument,		NULL, 'c'},
-		{"syslog",	no_argument,		NULL, 'd'},
+		{"workers",	required_argument,	NULL, 'c'},
+		{"verbose",	no_argument,		NULL, 'd'},
+		{"debug",	no_argument,		NULL, 'e'},
+		{"syslog",	no_argument,		NULL, 'f'},
 		{0, 0, 0, 0}
 	};
 
-	while ((opts = getopt_long(argc, argv, "abefcd", longopts, NULL)) != -1)
+	while ((opts = getopt_long(argc, argv, "abcdef", longopts, NULL)) != -1)
 		switch (opts)
 		{
 			case 'a':
@@ -610,18 +598,18 @@ int main(int argc, char** argv)
 			case 'b':
 				add_node(&dst_nodes, &dst_nodes_count, optarg);
 				break;
-			case 'e':
+			case 'c':
 				if (unlikely(!pfcq_isnumber(optarg)))
 					panic("Wrong workers count!");
 				workers_count = atoi(optarg);
 				break;
-			case 'f':
+			case 'd':
 				be_verbose = 1;
 				break;
-			case 'c':
+			case 'e':
 				do_debug = 1;
 				break;
-			case 'd':
+			case 'f':
 				use_syslog = 1;
 				break;
 			default:
