@@ -1,3 +1,7 @@
-build
+build_debug
+build_release
+build_clang
+build_clang_analyzer
+build_icc
 *~
 *.swp
