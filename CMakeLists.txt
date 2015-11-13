@@ -56,6 +56,7 @@ target_link_libraries(glcopy
 	pthread
 	${CEPHFS_LIBRARIES}
 	${GLUSTERFS-API_LIBRARIES}
+	ln_pfcfsq
 	ln_pfcquirks
 	ln_pfglfsquirks
 	ln_pfpthquirks

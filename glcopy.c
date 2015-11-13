@@ -40,7 +40,11 @@ typedef enum glc_node_type
 
 typedef struct glc_cfs_node
 {
-	int __padding1; /* struct padding */
+	struct ceph_mount_info* fs;
+	char* mons;
+	char* id;
+	char* keyring_file;
+	char* root;
 } glc_cfs_node_t;
 
 typedef struct glc_glfs_node
@@ -119,12 +123,45 @@ static void add_node(gl_node_t** _list, unsigned int* _counter, const char* _uri
 	if (unlikely(!tmp_p))
 		goto out;
 
-	// fs:protocol:server:port:volume:path
+	// CephFS: cfs:mons:id:keyring_file:root:path
+	// GlusterFS: glfs:protocol:server:port:volume:path
 	part = strsep(&p, ":");
 	if (unlikely(!part))
 		goto lfree;
 	if (strcmp(part, "cfs") == 0)
 	{
+		(*_list[*_counter]).node_type = GLCNT_CFS;
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto cfs_err;
+		(*_list[*_counter]).node.cfs_node.mons = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto cfs_err;
+		(*_list[*_counter]).node.cfs_node.id = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto cfs_err;
+		(*_list[*_counter]).node.cfs_node.keyring_file = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto cfs_err;
+		(*_list[*_counter]).node.cfs_node.root = pfcq_strdup(part);
+		part = strsep(&p, ":");
+		if (unlikely(!part))
+			goto cfs_err;
+		(*_list[*_counter]).path = pfcq_strdup(part);
+		goto cfs_lfree;
+
+cfs_err:
+		pfcq_free((*_list[*_counter]).node.cfs_node.mons);
+		pfcq_free((*_list[*_counter]).node.cfs_node.id);
+		pfcq_free((*_list[*_counter]).node.cfs_node.keyring_file);
+		pfcq_free((*_list[*_counter]).node.cfs_node.root);
+		pfcq_free((*_list[*_counter]).path);
+cfs_lfree:
+		__noop;
+
 	} else if (strcmp(part, "glfs") == 0)
 	{
 		(*_list[*_counter]).node_type = GLCNT_GLFS;
@@ -160,7 +197,8 @@ glfs_err:
 		(*_list[*_counter]).node.glfs_node.port = 0;
 glfs_lfree:
 		__noop;
-	}
+	} else
+		panic("Unknown FS type specified");
 
 	(*_counter)++;
 
@@ -176,6 +214,25 @@ static void open_node(gl_node_t* _list, unsigned int _index, char* _log)
 	switch (_list[_index].node_type)
 	{
 		case GLCNT_CFS:
+			if (unlikely(!_list[_index].node.cfs_node.mons))
+				panic("No CephFS monitors specified!");
+			if (unlikely(!_list[_index].node.cfs_node.id))
+				panic("No CephFS ID specified!");
+			if (unlikely(!_list[_index].node.cfs_node.keyring_file))
+				panic("No CephFS keyring file specified!");
+			if (unlikely(!_list[_index].node.cfs_node.root))
+				panic("No CephFS root specified!");
+			if (unlikely(!_list[_index].path))
+				panic("No CephFS path specified!");
+
+			_list[_index].node.cfs_node.fs = cfs_mount(
+				_list[_index].node.cfs_node.mons,
+				_list[_index].node.cfs_node.id,
+				_list[_index].node.cfs_node.keyring_file,
+				_list[_index].node.cfs_node.root);
+
+			if (unlikely(!_list[_index].node.cfs_node.fs))
+				panic("cfs_mount");
 			break;
 		case GLCNT_GLFS:
 			if (unlikely(_list[_index].node.glfs_node.protocol[0] == 0))
@@ -202,6 +259,7 @@ static void open_node(gl_node_t* _list, unsigned int _index, char* _log)
 				panic("glfs_init");
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
@@ -213,12 +271,15 @@ static void close_node(gl_node_t* _list, unsigned int _index)
 	switch (_list[_index].node_type)
 	{
 		case GLCNT_CFS:
+			if (unlikely(cfs_unmount(_list[_index].node.cfs_node.fs) == -1))
+				warning("cfs_unmount");
 			break;
 		case GLCNT_GLFS:
 			if (unlikely(glfs_fini(_list[_index].node.glfs_node.fs)))
 				warning("glfs_fini");
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
@@ -230,6 +291,10 @@ static void delete_node(gl_node_t** _list, unsigned int _index)
 	switch ((*_list[_index]).node_type)
 	{
 		case GLCNT_CFS:
+			pfcq_free((*_list[_index]).node.cfs_node.mons);
+			pfcq_free((*_list[_index]).node.cfs_node.id);
+			pfcq_free((*_list[_index]).node.cfs_node.keyring_file);
+			pfcq_free((*_list[_index]).node.cfs_node.root);
 			break;
 		case GLCNT_GLFS:
 			pfcq_free((*_list[_index]).node.glfs_node.protocol);
@@ -238,6 +303,7 @@ static void delete_node(gl_node_t** _list, unsigned int _index)
 			pfcq_free((*_list[_index]).node.glfs_node.volume);
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 	pfcq_free((*_list[_index]).path);
@@ -275,11 +341,13 @@ static void mkdir_node(mkdir_context_t* _context)
 	switch (dst_nodes[_context->fop.dst_index].node_type)
 	{
 		case GLCNT_CFS:
+			cfs_mkdir_safe(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->fop.dst_path, _context->fop.mode);
 			break;
 		case GLCNT_GLFS:
 			glfs_mkdir_safe(dst_nodes[_context->fop.dst_index].node.glfs_node.fs, _context->fop.dst_path, _context->fop.mode);
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
@@ -297,6 +365,23 @@ static void copyfile_node(copy_context_t* _context)
 	switch (src_nodes[_context->fop.src_index].node_type)
 	{
 		case GLCNT_CFS:
+			_context->src_fd.cfs_fd_hd = ceph_open(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->fop.src_path, O_RDONLY, 0);
+			if (unlikely(!_context->src_fd.glfs_fd_hd))
+				goto cfs_err;
+			_context->dst_fd.cfs_fd_hd = ceph_open(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->fop.dst_path, O_CREAT | O_WRONLY | O_TRUNC, _context->fop.mode);
+			if (unlikely(!_context->dst_fd.cfs_fd_hd))
+				goto cfs_err;
+
+			goto cfs_out;
+
+cfs_err:
+			if (likely(_context->src_fd.cfs_fd_hd))
+				ceph_close(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->src_fd.cfs_fd_hd);
+			if (likely(_context->dst_fd.cfs_fd_hd))
+				ceph_close(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->dst_fd.cfs_fd_hd);
+			goto out;
+
+cfs_out:
 			break;
 		case GLCNT_GLFS:
 			_context->src_fd.glfs_fd_hd = glfs_open(src_nodes[_context->fop.src_index].node.glfs_node.fs, _context->fop.src_path, O_RDONLY);
@@ -318,6 +403,7 @@ glfs_err:
 glfs_out:
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
@@ -326,11 +412,13 @@ glfs_out:
 		switch (src_nodes[_context->fop.src_index].node_type)
 		{
 			case GLCNT_CFS:
+				_context->read_size = ceph_read(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->src_fd.cfs_fd_hd, _context->buffer, IO_CHUNK_SIZE, -1);
 				break;
 			case GLCNT_GLFS:
 				_context->read_size = glfs_read(_context->src_fd.glfs_fd_hd, _context->buffer, IO_CHUNK_SIZE, 0);
 				break;
 			default:
+				panic("Not implemented");
 				break;
 		}
 
@@ -340,11 +428,13 @@ glfs_out:
 		switch (dst_nodes[_context->fop.dst_index].node_type)
 		{
 			case GLCNT_CFS:
+				ceph_write(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->dst_fd.cfs_fd_hd, _context->buffer, _context->read_size, -1);
 				break;
 			case GLCNT_GLFS:
 				glfs_write(_context->dst_fd.glfs_fd_hd, _context->buffer, _context->read_size, 0);
 				break;
 			default:
+				panic("Not implemented");
 				break;
 		}
 	}
@@ -352,24 +442,30 @@ glfs_out:
 	switch (src_nodes[_context->fop.src_index].node_type)
 	{
 		case GLCNT_CFS:
+			if (likely(_context->src_fd.cfs_fd_hd > 0))
+				ceph_close(src_nodes[_context->fop.src_index].node.cfs_node.fs, _context->src_fd.cfs_fd_hd);
 			break;
 		case GLCNT_GLFS:
 			if (likely(_context->src_fd.glfs_fd_hd))
 				glfs_close(_context->src_fd.glfs_fd_hd);
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
 	switch (dst_nodes[_context->fop.dst_index].node_type)
 	{
 		case GLCNT_CFS:
+			if (likely(_context->dst_fd.cfs_fd_hd > 0))
+				ceph_close(dst_nodes[_context->fop.dst_index].node.cfs_node.fs, _context->dst_fd.cfs_fd_hd);
 			break;
 		case GLCNT_GLFS:
 			if (likely(_context->dst_fd.glfs_fd_hd))
 				glfs_close(_context->dst_fd.glfs_fd_hd);
 			break;
 		default:
+			panic("Not implemented");
 			break;
 	}
 
@@ -413,7 +509,7 @@ lfree:
 	return NULL;
 }
 
-static void walk_nodes_dentry_handler(glfs_t* _fs, const char* _path, struct dirent* _dentry, struct stat* _sb, void* _data, unsigned int _level)
+static void cfs_walk_nodes_dentry_handler(struct ceph_mount_info* _fs, const char* _path, struct dirent* _dentry, struct stat* _sb, void* _data, unsigned int _level)
 {
 	(void)_dentry;
 	(void)_level;
@@ -430,7 +526,42 @@ static void walk_nodes_dentry_handler(glfs_t* _fs, const char* _path, struct dir
 			new_mkdir_context->fop.mode = _sb->st_mode;
 			pfpthq_inc(pool, &id, "mkdir worker", mkdir_worker, (void*)new_mkdir_context);
 		}
-		glfs_walk_dir_generic(_fs, _path, walk_nodes_dentry_handler, NULL, _data, 0);
+		cfs_walk_dir_generic(_fs, _path, cfs_walk_nodes_dentry_handler, NULL, _data, 0);
+	}
+	else
+	{
+		for (unsigned int i = 0; i < dst_nodes_count; i++)
+		{
+			copy_context_t* new_copy_context = pfcq_alloc(sizeof(copy_context_t));
+			new_copy_context->fop.src_index = *((unsigned int*)_data);
+			new_copy_context->fop.dst_index = i;
+			new_copy_context->fop.src_path = pfcq_strdup(_path);
+			new_copy_context->fop.mode = _sb->st_mode;
+			pfpthq_inc(pool, &id, "copy worker", copy_worker, (void*)new_copy_context);
+		}
+	}
+
+	return;
+}
+
+static void glfs_walk_nodes_dentry_handler(glfs_t* _fs, const char* _path, struct dirent* _dentry, struct stat* _sb, void* _data, unsigned int _level)
+{
+	(void)_dentry;
+	(void)_level;
+	pthread_t id;
+
+	if (unlikely(S_ISDIR(_sb->st_mode)))
+	{
+		for (unsigned int i = 0; i < dst_nodes_count; i++)
+		{
+			mkdir_context_t* new_mkdir_context = pfcq_alloc(sizeof(mkdir_context_t));
+			new_mkdir_context->fop.src_index = *((unsigned int*)_data);
+			new_mkdir_context->fop.dst_index = i;
+			new_mkdir_context->fop.src_path = pfcq_strdup(_path);
+			new_mkdir_context->fop.mode = _sb->st_mode;
+			pfpthq_inc(pool, &id, "mkdir worker", mkdir_worker, (void*)new_mkdir_context);
+		}
+		glfs_walk_dir_generic(_fs, _path, glfs_walk_nodes_dentry_handler, NULL, _data, 0);
 	}
 	else
 	{
@@ -511,11 +642,13 @@ int main(int argc, char** argv)
 		switch (dst_nodes[i].node_type)
 		{
 			case GLCNT_CFS:
+				cfs_mkdir_safe(dst_nodes[i].node.cfs_node.fs, dst_nodes[i].path, CHMOD_755);
 				break;
 			case GLCNT_GLFS:
 				glfs_mkdir_safe(dst_nodes[i].node.glfs_node.fs, dst_nodes[i].path, CHMOD_755);
 				break;
 			default:
+				panic("Not implemented");
 				break;
 		}
 	}
@@ -525,9 +658,10 @@ int main(int argc, char** argv)
 		switch (src_nodes[i].node_type)
 		{
 			case GLCNT_CFS:
+				cfs_walk_dir_generic(src_nodes[i].node.cfs_node.fs, src_nodes[i].path, cfs_walk_nodes_dentry_handler, NULL, &i, 0);
 				break;
 			case GLCNT_GLFS:
-				glfs_walk_dir_generic(src_nodes[i].node.glfs_node.fs, src_nodes[i].path, walk_nodes_dentry_handler, NULL, &i, 0);
+				glfs_walk_dir_generic(src_nodes[i].node.glfs_node.fs, src_nodes[i].path, glfs_walk_nodes_dentry_handler, NULL, &i, 0);
 				break;
 			default:
 				break;
