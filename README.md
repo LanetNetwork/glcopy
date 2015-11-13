@@ -35,8 +35,8 @@ The following arguments are supported:
 
 * --from=&lt;glfs:[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies source GlusterFS endpoint;
 * --to=&lt;glfs:[tcp|udp]:server:[port]:volume:path&gt; (mandatory) specifies target GlusterFS endpoint;
-* --from=&lt;cfs:monitors:id:keyring\_file:root:path&gt; (mandatory) specifies source CephFS endpoint;
-* --to=&lt;cfs:monitors:id:keyring\_file:root:path&gt; (mandatory) specifies target CephFS endpoint;
+* --from=&lt;cfs:monitors:clientid:keyring\_file:root:path&gt; (mandatory) specifies source CephFS endpoint;
+* --to=&lt;cfs:monitors:clientid:keyring\_file:root:path&gt; (mandatory) specifies target CephFS endpoint;
 * --workers=&lt;amount&gt; (optional, default "3") specifies parallel copy workers count (specifying more than 4 is dangerous due to high server CPU load!);
 * --verbose (optional) enables verbose output;
 * --debug (optional) enables debug output;
